@@ -1,0 +1,11 @@
+.settings
+.project
+.svn
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.swp
+*~
+.depend*
+attrdiff
