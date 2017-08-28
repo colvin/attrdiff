@@ -17,10 +17,23 @@
 
 #define USERMAX		32
 #define GROUPMAX	32
+#define FTYPEMAX	10
 
+typedef enum sttype {
+	TYPE_REG,
+	TYPE_DIR,
+	TYPE_LINK,
+	TYPE_UNKNOWN = 99
+} sttype;
+
+int	dir(char *, char *, char *);
 int	cmp(char *, char *);
+sttype	ftype(struct stat *);
+int	strftype(sttype, char *);
 void	pwname(uid_t, char *);
 void	grpname(gid_t,char *);
+int	permint(struct stat *);
+void	permstr(struct stat *, char *);
 void	usage(void);
 
 int
@@ -28,10 +41,8 @@ main(int argc, char *argv[])
 {
 	int	ch;
 	char	*lpath, *rpath;
-	DIR	*dh;
 
 	struct stat	lstat, rstat;
-	struct dirent	*ent;
 
 	lpath = rpath = NULL;
 
@@ -65,20 +76,69 @@ main(int argc, char *argv[])
 	} else if (S_ISDIR(lstat.st_mode)) {
 		if (!S_ISDIR(rstat.st_mode))
 			errx(EXIT_FAILURE,"left and right must be the same type");
-		if ((dh = opendir(lpath)) == NULL)
-			err(EXIT_FAILURE,"cannot open left directory");
-		while ((ent = readdir(dh)) != NULL) {
-			if (strcmp(ent->d_name,".") == 0)
-				continue;
-			if (strcmp(ent->d_name,"..") == 0)
-				continue;
-			printf("----> %s\n",ent->d_name);
-		}
+		if (dir(lpath,rpath,NULL))
+			errx(EXIT_FAILURE,"failed to process directories");
 	} else {
 		errx(EXIT_FAILURE,"must be a file or directory");
 	}
 
 	return EXIT_SUCCESS;
+}
+
+int
+dir(char *lpath, char *rpath, char *subdir)
+{
+	char		*l, *r, *lw, *rw;
+	DIR		*dh;
+	struct dirent	*ent;
+	struct stat	st;
+
+	l = calloc(PATH_MAX,sizeof(char));
+	r = calloc(PATH_MAX,sizeof(char));
+	lw = calloc(PATH_MAX,sizeof(char));
+	rw = calloc(PATH_MAX,sizeof(char));
+
+	if (subdir == NULL) {
+		snprintf(l,PATH_MAX,"%s",lpath);
+		snprintf(r,PATH_MAX,"%s",rpath);
+	} else {
+		snprintf(l,PATH_MAX,"%s/%s",lpath,subdir);
+		snprintf(r,PATH_MAX,"%s/%s",rpath,subdir);
+	}
+
+	if ((dh = opendir(l)) == NULL) {
+		warn("failed to open left directory %s",l);
+		goto fail;
+	}
+	while ((ent = readdir(dh)) != NULL) {
+		if (strcmp(ent->d_name,".") == 0)
+			continue;
+		if (strcmp(ent->d_name,"..") == 0)
+			continue;
+		snprintf(lw,PATH_MAX,"%s/%s",l,ent->d_name);
+		snprintf(rw,PATH_MAX,"%s/%s",r,ent->d_name);
+		if (lstat(lw,&st) != 0) {
+			warn("failed to stat left file %s",lw);
+			continue;
+		}
+		cmp(lw,rw);
+		if (S_ISDIR(st.st_mode)) {
+			dir(l,r,ent->d_name);
+			continue;
+		}
+	}
+
+	goto success;
+
+success:
+	free(l);
+	free(r);
+	return EXIT_SUCCESS;
+
+fail:
+	free(l);
+	free(r);
+	return EXIT_FAILURE;
 }
 
 int
@@ -91,27 +151,110 @@ cmp(char *lpath, char *rpath)
 	char	ruser[USERMAX + 1];
 	char	rgroup[GROUPMAX + 1];
 
+	int	lperm, rperm;
+
+	sttype	ltype, rtype;
+
+	printf("--\n%s\n%s\n",lpath,rpath);
+
 	if (lstat(lpath,&lst) != 0) {
-		warn("failed to stat left %s",lpath);
+		switch(errno) {
+		case ENOENT:
+			printf("\t%s does not exist\n",lpath);
+			break;
+		case EACCES:
+			printf("\terror cannot access %s: %s\n",lpath,strerror(errno));
+			break;
+		case ENOTDIR:
+			printf("\terror not a directory\n");
+			break;
+		default:
+			printf("\terror failed to stat %s: %s",lpath,strerror(errno));
+			break;
+		}
 		return errno;
 	}
 	if (lstat(rpath,&rst) != 0) {
-		warn("failed to stat right %s",rpath);
+		switch(errno) {
+		case ENOENT:
+			printf("\t%s does not exist\n",rpath);
+			break;
+		case EACCES:
+			printf("\terror cannot access %s: %s\n",rpath,strerror(errno));
+			break;
+		case ENOTDIR:
+			printf("\terror not a directory\n");
+			break;
+		default:
+			printf("\terror failed to stat %s: %s",rpath,strerror(errno));
+			break;
+		}
 		return errno;
+	}
+
+	if ((ltype = ftype(&lst)) == TYPE_UNKNOWN)
+		warn("\tfiletype of left is unknown");
+	if ((rtype = ftype(&rst)) == TYPE_UNKNOWN)
+		warn("\tfiletype of right is unknown");
+
+	if (ltype != rtype) {
+		char *lstr = calloc(FTYPEMAX,sizeof(char));
+		char *rstr = calloc(FTYPEMAX,sizeof(char));
+		strftype(ltype,lstr);
+		strftype(rtype,rstr);
+		printf("\tfiletype %s %s\n",lstr,rstr);
 	}
 
 	pwname(lst.st_uid,luser);
 	pwname(rst.st_uid,ruser);
 
 	if (lst.st_uid != rst.st_uid)
-		fprintf(stdout,"%s user %s %s\n",lpath,luser,ruser);
+		fprintf(stdout,"\tuser %s %s\n",luser,ruser);
 
 	grpname(lst.st_gid,lgroup);
 	grpname(rst.st_gid,rgroup);
 
 	if (lst.st_gid != rst.st_gid)
-		fprintf(stdout,"%s group %s %s\n",lpath,lgroup,rgroup);
+		fprintf(stdout,"\tgroup %s %s\n",lgroup,rgroup);
 
+	lperm = permint(&lst);
+	rperm = permint(&rst);
+
+	if (lperm != rperm)
+		printf("\tpermissions %d %d\n",lperm,rperm);
+
+	return EXIT_SUCCESS;
+}
+
+sttype
+ftype(struct stat *st)
+{
+	if (S_ISREG(st->st_mode))
+		return TYPE_REG;
+	else if (S_ISDIR(st->st_mode))
+		return TYPE_DIR;
+	else if (S_ISLNK(st->st_mode))
+		return TYPE_LINK;
+	else
+		return TYPE_UNKNOWN;
+}
+
+int
+strftype(sttype t, char *r)
+{
+	switch(t) {
+		case TYPE_REG:
+			snprintf(r,FTYPEMAX,"%s","file");
+			break;
+		case TYPE_DIR:
+			snprintf(r,FTYPEMAX,"%s","directory");
+			break;
+		case TYPE_LINK:
+			snprintf(r,FTYPEMAX,"%s","symlink");
+			break;
+		default:
+			return EXIT_FAILURE;
+	}
 	return EXIT_SUCCESS;
 }
 
@@ -142,5 +285,46 @@ grpname(gid_t gid, char *name)
 		snprintf(name,GROUPMAX,"%s",grp->gr_name);
 	else
 		snprintf(name,GROUPMAX,"%u",gid);
+}
+
+int
+permint(struct stat *st)
+{
+	int r = 0;
+
+	if (st->st_mode & S_IRUSR)
+		r += 400;
+	if (st->st_mode & S_IWUSR)
+		r += 200;
+	if (st->st_mode & S_IXUSR)
+		r += 100;
+	if (st->st_mode & S_IRGRP)
+		r += 40;
+	if (st->st_mode & S_IWGRP)
+		r += 20;
+	if (st->st_mode & S_IXGRP)
+		r += 10;
+	if (st->st_mode & S_IROTH)
+		r += 4;
+	if (st->st_mode & S_IWOTH)
+		r += 2;
+	if (st->st_mode & S_IXOTH)
+		r += 1;
+
+	return r;
+}
+
+void
+permstr(struct stat *st, char *buf)
+{
+	strncat(buf,(st->st_mode & S_IRUSR) ? "r" : "-",sizeof(char));
+	strncat(buf,(st->st_mode & S_IWUSR) ? "w" : "-",sizeof(char));
+	strncat(buf,(st->st_mode & S_IXUSR) ? "x" : "-",sizeof(char));
+	strncat(buf,(st->st_mode & S_IRGRP) ? "r" : "-",sizeof(char));
+	strncat(buf,(st->st_mode & S_IWGRP) ? "w" : "-",sizeof(char));
+	strncat(buf,(st->st_mode & S_IXGRP) ? "x" : "-",sizeof(char));
+	strncat(buf,(st->st_mode & S_IROTH) ? "r" : "-",sizeof(char));
+	strncat(buf,(st->st_mode & S_IWOTH) ? "w" : "-",sizeof(char));
+	strncat(buf,(st->st_mode & S_IXOTH) ? "x" : "-",sizeof(char));
 }
 
