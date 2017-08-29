@@ -155,20 +155,28 @@ cmp(char *lpath, char *rpath)
 
 	sttype	ltype, rtype;
 
-	printf("--\n%s\n%s\n",lpath,rpath);
+	int banner = 0;
+#define BANNER()	if (banner == 0) { \
+				printf("--\n%s\n%s\n",lpath,rpath); \
+				banner = 1; \
+			}
 
 	if (lstat(lpath,&lst) != 0) {
 		switch(errno) {
 		case ENOENT:
+			BANNER();
 			printf("\t%s does not exist\n",lpath);
 			break;
 		case EACCES:
+			BANNER();
 			printf("\terror cannot access %s: %s\n",lpath,strerror(errno));
 			break;
 		case ENOTDIR:
+			BANNER();
 			printf("\terror not a directory\n");
 			break;
 		default:
+			BANNER();
 			printf("\terror failed to stat %s: %s",lpath,strerror(errno));
 			break;
 		}
@@ -177,51 +185,66 @@ cmp(char *lpath, char *rpath)
 	if (lstat(rpath,&rst) != 0) {
 		switch(errno) {
 		case ENOENT:
+			BANNER();
 			printf("\t%s does not exist\n",rpath);
 			break;
 		case EACCES:
+			BANNER();
 			printf("\terror cannot access %s: %s\n",rpath,strerror(errno));
 			break;
 		case ENOTDIR:
+			BANNER();
 			printf("\terror not a directory\n");
 			break;
 		default:
+			BANNER();
 			printf("\terror failed to stat %s: %s",rpath,strerror(errno));
 			break;
 		}
 		return errno;
 	}
 
-	if ((ltype = ftype(&lst)) == TYPE_UNKNOWN)
+	if ((ltype = ftype(&lst)) == TYPE_UNKNOWN) {
+		BANNER();
 		warn("\tfiletype of left is unknown");
-	if ((rtype = ftype(&rst)) == TYPE_UNKNOWN)
+	}
+	if ((rtype = ftype(&rst)) == TYPE_UNKNOWN) {
+		BANNER();
 		warn("\tfiletype of right is unknown");
+	}
 
 	if (ltype != rtype) {
 		char *lstr = calloc(FTYPEMAX,sizeof(char));
 		char *rstr = calloc(FTYPEMAX,sizeof(char));
 		strftype(ltype,lstr);
 		strftype(rtype,rstr);
+		BANNER();
 		printf("\tfiletype %s %s\n",lstr,rstr);
 	}
 
 	pwname(lst.st_uid,luser);
 	pwname(rst.st_uid,ruser);
 
-	if (lst.st_uid != rst.st_uid)
+	if (lst.st_uid != rst.st_uid) {
+		BANNER();
 		fprintf(stdout,"\tuser %s %s\n",luser,ruser);
+	}
 
 	grpname(lst.st_gid,lgroup);
 	grpname(rst.st_gid,rgroup);
 
-	if (lst.st_gid != rst.st_gid)
+	if (lst.st_gid != rst.st_gid) {
+		BANNER();
 		fprintf(stdout,"\tgroup %s %s\n",lgroup,rgroup);
+	}
 
 	lperm = permint(&lst);
 	rperm = permint(&rst);
 
-	if (lperm != rperm)
+	if (lperm != rperm) {
+		BANNER();
 		printf("\tpermissions %d %d\n",lperm,rperm);
+	}
 
 	return EXIT_SUCCESS;
 }
