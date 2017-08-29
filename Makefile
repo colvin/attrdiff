@@ -1,4 +1,4 @@
-CC	= clang
+CC	= cc
 CFLAGS	+= -g -Wall
 
 SRC	= attrdiff.c
