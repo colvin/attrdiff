@@ -36,15 +36,14 @@ int	permint(struct stat *);
 void	permstr(struct stat *, char *);
 void	usage(void);
 
+char	lprefix[PATH_MAX], rprefix[PATH_MAX];
+
 int
 main(int argc, char *argv[])
 {
 	int	ch;
-	char	*lpath, *rpath;
 
 	struct stat	lstat, rstat;
-
-	lpath = rpath = NULL;
 
 	while ((ch = getopt(argc,argv,"h")) != -1) {
 		switch(ch) {
@@ -61,22 +60,23 @@ main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	lpath = argv[0];
-	rpath = argv[1];
+	/* store the prefixes globally */
+	snprintf(lprefix,sizeof(lprefix),"%s",argv[0]);
+	snprintf(rprefix,sizeof(rprefix),"%s",argv[1]);
 
-	if (stat(lpath,&lstat) != 0)
-		err(EXIT_FAILURE,"failed to stat left %s",lpath);
-	if (stat(rpath,&rstat) != 0)
-		err(EXIT_FAILURE,"failed to stat right %s",rpath);
+	if (stat(lprefix,&lstat) != 0)
+		err(EXIT_FAILURE,"failed to stat left %s",lprefix);
+	if (stat(rprefix,&rstat) != 0)
+		err(EXIT_FAILURE,"failed to stat right %s",rprefix);
 
 	if (S_ISREG(lstat.st_mode)) {
 		if (!S_ISREG(rstat.st_mode))
 			errx(EXIT_FAILURE,"left and right must be the same type");
-		return cmp(lpath,rpath);
+		return cmp(lprefix,rprefix);
 	} else if (S_ISDIR(lstat.st_mode)) {
 		if (!S_ISDIR(rstat.st_mode))
 			errx(EXIT_FAILURE,"left and right must be the same type");
-		if (dir(lpath,rpath,NULL))
+		if (dir(lprefix,rprefix,NULL))
 			errx(EXIT_FAILURE,"failed to process directories");
 	} else {
 		errx(EXIT_FAILURE,"must be a file or directory");
@@ -157,7 +157,10 @@ cmp(char *lpath, char *rpath)
 
 	int banner = 0;
 #define BANNER()	if (banner == 0) { \
-				printf("--\n%s\n%s\n",lpath,rpath); \
+				size_t llen = strlen(lprefix); \
+				if (strstr(lprefix,"/") == lprefix) \
+					llen++; \
+				printf("%s\n",(lpath + llen)); \
 				banner = 1; \
 			}
 
