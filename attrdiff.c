@@ -13,8 +13,6 @@
 #include <grp.h>
 #include <string.h>
 
-#define PROGNAME	"attrdiff"
-
 #define USERMAX		32
 #define GROUPMAX	32
 #define FTYPEMAX	10
@@ -27,16 +25,19 @@ typedef enum sttype {
 } sttype;
 
 int	dir(char *, char *, char *);
+int	reverse(char *, char *, char *);
 int	cmp(char *, char *);
 sttype	ftype(struct stat *);
 int	strftype(sttype, char *);
 void	pwname(uid_t, char *);
 void	grpname(gid_t,char *);
-int	permint(struct stat *);
-void	permstr(struct stat *, char *);
+int	perm_int(struct stat *);
+char	*perm_str(struct stat *);	/* you must free this */
 void	usage(void);
 
 char	lprefix[PATH_MAX], rprefix[PATH_MAX];
+
+int	Rflag = 0;
 
 int
 main(int argc, char *argv[])
@@ -45,11 +46,17 @@ main(int argc, char *argv[])
 
 	struct stat	lstat, rstat;
 
-	while ((ch = getopt(argc,argv,"h")) != -1) {
+	while ((ch = getopt(argc,argv,"hR")) != -1) {
 		switch(ch) {
-		case 'h':
-			usage();
-			exit(EXIT_SUCCESS);
+			case 'h':
+				usage();
+				exit(EXIT_SUCCESS);
+			case 'R':
+				Rflag = 1;
+				break;
+			case '?':
+				usage();
+				exit(EXIT_FAILURE);
 		}
 	}
 	argc -= optind;
@@ -60,7 +67,6 @@ main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	/* store the prefixes globally */
 	snprintf(lprefix,sizeof(lprefix),"%s",argv[0]);
 	snprintf(rprefix,sizeof(rprefix),"%s",argv[1]);
 
@@ -78,6 +84,10 @@ main(int argc, char *argv[])
 			errx(EXIT_FAILURE,"left and right must be the same type");
 		if (dir(lprefix,rprefix,NULL))
 			errx(EXIT_FAILURE,"failed to process directories");
+		if (Rflag) {
+			if (reverse(lprefix,rprefix,NULL))
+				errx(EXIT_FAILURE,"failed to process reverse mode");
+		}
 	} else {
 		errx(EXIT_FAILURE,"must be a file or directory");
 	}
@@ -108,7 +118,11 @@ dir(char *lpath, char *rpath, char *subdir)
 
 	if ((dh = opendir(l)) == NULL) {
 		warn("failed to open left directory %s",l);
-		goto fail;
+		free(l);
+		free(r);
+		free(lw);
+		free(rw);
+		return EXIT_FAILURE;
 	}
 	while ((ent = readdir(dh)) != NULL) {
 		if (strcmp(ent->d_name,".") == 0)
@@ -118,7 +132,14 @@ dir(char *lpath, char *rpath, char *subdir)
 		snprintf(lw,PATH_MAX,"%s/%s",l,ent->d_name);
 		snprintf(rw,PATH_MAX,"%s/%s",r,ent->d_name);
 		if (lstat(lw,&st) != 0) {
-			warn("failed to stat left file %s",lw);
+			switch(errno) {
+				case EACCES:
+					printf("%s\n\terror access (%s)\n",lw,strerror(errno));
+					break;
+				default:
+					printf("%s\n\terror unknown (%s)\n",lw,strerror(errno));
+					break;
+			}
 			continue;
 		}
 		cmp(lw,rw);
@@ -128,17 +149,97 @@ dir(char *lpath, char *rpath, char *subdir)
 		}
 	}
 
-	goto success;
-
-success:
+	closedir(dh);
 	free(l);
 	free(r);
+	free(lw);
+	free(rw);
 	return EXIT_SUCCESS;
+}
 
-fail:
+int
+reverse(char *lpath, char *rpath, char *subdir)
+{
+	char		*l, *r, *lw, *rw;
+	DIR		*dh;
+	struct dirent	*ent;
+	struct stat	st;
+
+	static int	banner = 0;
+#define RBANNER()	if (banner == 0) { \
+				printf("--\n"); \
+				banner = 1; \
+			}
+
+	l = calloc(PATH_MAX,sizeof(char));
+	r = calloc(PATH_MAX,sizeof(char));
+	lw = calloc(PATH_MAX,sizeof(char));
+	rw = calloc(PATH_MAX,sizeof(char));
+
+	if (subdir == NULL) {
+		snprintf(l,PATH_MAX,"%s",lpath);
+		snprintf(r,PATH_MAX,"%s",rpath);
+	} else {
+		snprintf(l,PATH_MAX,"%s/%s",lpath,subdir);
+		snprintf(r,PATH_MAX,"%s/%s",rpath,subdir);
+	}
+
+	if ((dh = opendir(r)) == NULL) {
+		warn("failed to open right directory %s",l);
+		free(l);
+		free(r);
+		free(lw);
+		free(rw);
+		return EXIT_FAILURE;
+	}
+	while ((ent = readdir(dh)) != NULL) {
+		if (strcmp(ent->d_name,".") == 0)
+			continue;
+		if (strcmp(ent->d_name,"..") == 0)
+			continue;
+		snprintf(lw,PATH_MAX,"%s/%s",l,ent->d_name);
+		snprintf(rw,PATH_MAX,"%s/%s",r,ent->d_name);
+		if (lstat(rw,&st) != 0) {
+			switch(errno) {
+				case EACCES:
+					RBANNER();
+					printf("%s\n\terror access (%s)\n",lw,strerror(errno));
+					break;
+				default:
+					RBANNER();
+					printf("%s\n\terror unknown (%s)\n",lw,strerror(errno));
+					break;
+			}
+			continue;
+		}
+		if (access(lw,F_OK) != 0) {
+			switch (errno) {
+				case EACCES:
+					RBANNER();
+					printf("%s\n\terror access (%s)\n",lw,strerror(errno));
+					break;
+				case ENOENT:
+					RBANNER();
+					printf("%s\n\tmissing\n",lw);
+					break;
+				default:
+					RBANNER();
+					printf("%s\n\terror unknown (%s)\n",lw,strerror(errno));
+					break;
+			}
+		}
+		if (S_ISDIR(st.st_mode)) {
+			reverse(l,r,ent->d_name);
+			continue;
+		}
+	}
+
+	closedir(dh);
 	free(l);
 	free(r);
-	return EXIT_FAILURE;
+	free(lw);
+	free(rw);
+	return EXIT_SUCCESS;
 }
 
 int
@@ -166,54 +267,54 @@ cmp(char *lpath, char *rpath)
 
 	if (lstat(lpath,&lst) != 0) {
 		switch(errno) {
-		case ENOENT:
-			BANNER();
-			printf("\t%s does not exist\n",lpath);
-			break;
-		case EACCES:
-			BANNER();
-			printf("\terror cannot access %s: %s\n",lpath,strerror(errno));
-			break;
-		case ENOTDIR:
-			BANNER();
-			printf("\terror not a directory\n");
-			break;
-		default:
-			BANNER();
-			printf("\terror failed to stat %s: %s",lpath,strerror(errno));
-			break;
+			case ENOENT:
+				BANNER();
+				printf("\tmissing\n");
+				break;
+			case EACCES:
+				BANNER();
+				printf("\terror access (%s)\n",strerror(errno));
+				break;
+			case ENOTDIR:
+				BANNER();
+				printf("\terror directory\n");
+				break;
+			default:
+				BANNER();
+				printf("\terror stat (%s)\n",strerror(errno));
+				break;
 		}
 		return errno;
 	}
 	if (lstat(rpath,&rst) != 0) {
 		switch(errno) {
-		case ENOENT:
-			BANNER();
-			printf("\t%s does not exist\n",rpath);
-			break;
-		case EACCES:
-			BANNER();
-			printf("\terror cannot access %s: %s\n",rpath,strerror(errno));
-			break;
-		case ENOTDIR:
-			BANNER();
-			printf("\terror not a directory\n");
-			break;
-		default:
-			BANNER();
-			printf("\terror failed to stat %s: %s",rpath,strerror(errno));
-			break;
+			case ENOENT:
+				BANNER();
+				printf("\tmissing\n");
+				break;
+			case EACCES:
+				BANNER();
+				printf("\terror access (%s)\n",strerror(errno));
+				break;
+			case ENOTDIR:
+				BANNER();
+				printf("\terror directory\n");
+				break;
+			default:
+				BANNER();
+				printf("\terror stat (%s)\n",strerror(errno));
+				break;
 		}
 		return errno;
 	}
 
 	if ((ltype = ftype(&lst)) == TYPE_UNKNOWN) {
 		BANNER();
-		warn("\tfiletype of left is unknown");
+		printf("\tfiletype unknown left\n");
 	}
 	if ((rtype = ftype(&rst)) == TYPE_UNKNOWN) {
 		BANNER();
-		warn("\tfiletype of right is unknown");
+		printf("\tfiletype unknown right\n");
 	}
 
 	if (ltype != rtype) {
@@ -223,6 +324,8 @@ cmp(char *lpath, char *rpath)
 		strftype(rtype,rstr);
 		BANNER();
 		printf("\tfiletype %s %s\n",lstr,rstr);
+		free(lstr);
+		free(rstr);
 	}
 
 	pwname(lst.st_uid,luser);
@@ -230,7 +333,7 @@ cmp(char *lpath, char *rpath)
 
 	if (lst.st_uid != rst.st_uid) {
 		BANNER();
-		fprintf(stdout,"\tuser %s %s\n",luser,ruser);
+		printf("\tuser %s %s\n",luser,ruser);
 	}
 
 	grpname(lst.st_gid,lgroup);
@@ -238,11 +341,11 @@ cmp(char *lpath, char *rpath)
 
 	if (lst.st_gid != rst.st_gid) {
 		BANNER();
-		fprintf(stdout,"\tgroup %s %s\n",lgroup,rgroup);
+		printf("\tgroup %s %s\n",lgroup,rgroup);
 	}
 
-	lperm = permint(&lst);
-	rperm = permint(&rst);
+	lperm = perm_int(&lst);
+	rperm = perm_int(&rst);
 
 	if (lperm != rperm) {
 		BANNER();
@@ -287,7 +390,7 @@ strftype(sttype t, char *r)
 void
 usage(void)
 {
-	fprintf(stderr,"usage: %s <left> <right>\n",PROGNAME);
+	fprintf(stderr,"usage: attrdiff [-R] <left> <right>\n");
 }
 
 void
@@ -299,7 +402,6 @@ pwname(uid_t uid, char *name)
 		snprintf(name,USERMAX,"%s",pwd->pw_name);
 	else
 		snprintf(name,USERMAX,"%u",uid);
-
 }
 
 void
@@ -314,7 +416,7 @@ grpname(gid_t gid, char *name)
 }
 
 int
-permint(struct stat *st)
+perm_int(struct stat *st)
 {
 	int r = 0;
 
@@ -340,9 +442,10 @@ permint(struct stat *st)
 	return r;
 }
 
-void
-permstr(struct stat *st, char *buf)
+char *
+perm_str(struct stat *st)
 {
+	char	*buf = calloc(10,sizeof(char));
 	strncat(buf,(st->st_mode & S_IRUSR) ? "r" : "-",sizeof(char));
 	strncat(buf,(st->st_mode & S_IWUSR) ? "w" : "-",sizeof(char));
 	strncat(buf,(st->st_mode & S_IXUSR) ? "x" : "-",sizeof(char));
@@ -352,5 +455,6 @@ permstr(struct stat *st, char *buf)
 	strncat(buf,(st->st_mode & S_IROTH) ? "r" : "-",sizeof(char));
 	strncat(buf,(st->st_mode & S_IWOTH) ? "w" : "-",sizeof(char));
 	strncat(buf,(st->st_mode & S_IXOTH) ? "x" : "-",sizeof(char));
+	return buf;
 }
 
