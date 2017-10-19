@@ -38,6 +38,9 @@ void	usage(void);
 char	lprefix[PATH_MAX], rprefix[PATH_MAX];
 
 int	Rflag = 0;
+int	Iflag = 0;
+
+char	*ignoreglob;
 
 int
 main(int argc, char *argv[])
@@ -46,11 +49,17 @@ main(int argc, char *argv[])
 
 	struct stat	lstat, rstat;
 
-	while ((ch = getopt(argc,argv,"hR")) != -1) {
+	while ((ch = getopt(argc,argv,"hRI:")) != -1) {
 		switch(ch) {
 			case 'h':
 				usage();
 				exit(EXIT_SUCCESS);
+			case 'I':
+				if (Iflag)
+					errx(EINVAL,"only one -I is allowed");
+				Iflag = 1;
+				ignoreglob = strdup(optarg);
+				break;
 			case 'R':
 				Rflag = 1;
 				break;
@@ -89,6 +98,7 @@ main(int argc, char *argv[])
 				errx(EXIT_FAILURE,"failed to process reverse mode");
 		}
 	} else {
+		free(ignoreglob);
 		errx(EXIT_FAILURE,"must be a file or directory");
 	}
 
@@ -130,6 +140,8 @@ dir(char *lpath, char *rpath, char *subdir)
 		if (strcmp(ent->d_name,"..") == 0)
 			continue;
 		snprintf(lw,PATH_MAX,"%s/%s",l,ent->d_name);
+		if ((Iflag) && (strstr(lw,ignoreglob) != NULL))
+			continue;
 		snprintf(rw,PATH_MAX,"%s/%s",r,ent->d_name);
 		if (lstat(lw,&st) != 0) {
 			switch(errno) {
@@ -196,6 +208,8 @@ reverse(char *lpath, char *rpath, char *subdir)
 		if (strcmp(ent->d_name,".") == 0)
 			continue;
 		if (strcmp(ent->d_name,"..") == 0)
+			continue;
+		if ((Iflag) && (strstr(ent->d_name,ignoreglob)))
 			continue;
 		snprintf(lw,PATH_MAX,"%s/%s",l,ent->d_name);
 		snprintf(rw,PATH_MAX,"%s/%s",r,ent->d_name);
