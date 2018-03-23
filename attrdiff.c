@@ -22,6 +22,7 @@ struct attrdiff {
 	int	 recursion_max;
 	int	 recursion_level;
 	int	 do_reverse;
+	int	 do_color;
 	char	*left_prefix;
 	char	*right_prefix;
 };
@@ -36,6 +37,14 @@ int	walk(char *);
 int	compare(char *, struct stat *, struct stat *);
 
 #define EQ(x,y)	(strcmp(x,y) == 0)
+
+#define ANSI_COLOR_RED     "\x1b[31m"
+#define ANSI_COLOR_GREEN   "\x1b[32m"
+#define ANSI_COLOR_YELLOW  "\x1b[33m"
+#define ANSI_COLOR_BLUE    "\x1b[34m"
+#define ANSI_COLOR_MAGENTA "\x1b[35m"
+#define ANSI_COLOR_CYAN    "\x1b[36m"
+#define ANSI_COLOR_RESET   "\x1b[0m"
 
 void
 version(void)
@@ -71,7 +80,7 @@ main(int argc, char *argv[])
 
 	ctx->recursion_level = 1;
 
-	while ((ch = getopt(argc,argv,"hVvrl:")) != -1) {
+	while ((ch = getopt(argc,argv,"hVvrl:c")) != -1) {
 		switch(ch) {
 		case 'V':
 			version();
@@ -86,6 +95,9 @@ main(int argc, char *argv[])
 			break;
 		case 'l':
 			ctx->recursion_max = strtol(optarg,NULL,0);
+			break;
+		case 'c':
+			ctx->do_color = 1;
 			break;
 		}
 	}
@@ -185,10 +197,34 @@ walk(char *relative)
 int
 compare(char *work, struct stat *lst, struct stat *rst)
 {
+	int banner	= 0;
+
+#define PRINT_BANNER_ONCE()					\
+	if (! banner) {						\
+		printf("@ %s -%s +%s\n",work,ctx->right_prefix,ctx->left_prefix); \
+		banner = 1;					\
+	}
 
 	if (lst->st_uid != rst->st_uid) {
-		printf("- %s uid:%d\n",work,rst->st_uid);
-		printf("+ %s uid:%d\n",work,lst->st_uid);
+		PRINT_BANNER_ONCE();
+		printf("%s- uid:%d\n%s+ uid:%d%s\n",
+			(ctx->do_color) ? ANSI_COLOR_RED : "",
+			rst->st_uid,
+			(ctx->do_color) ? ANSI_COLOR_CYAN : "",
+			lst->st_uid,
+			(ctx->do_color) ? ANSI_COLOR_RESET : ""
+		);
+	}
+
+	if (lst->st_gid != rst->st_gid) {
+		PRINT_BANNER_ONCE();
+		printf("%s- gid:%d\n%s+ gid:%d%s\n",
+			(ctx->do_color) ? ANSI_COLOR_RED : "",
+			rst->st_gid,
+			(ctx->do_color) ? ANSI_COLOR_CYAN : "",
+			lst->st_gid,
+			(ctx->do_color) ? ANSI_COLOR_RESET : ""
+		);
 	}
 
 	return (EXIT_SUCCESS);
