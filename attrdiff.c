@@ -36,6 +36,13 @@ void	verbose(char *, ...);
 int	walk(char *);
 int	compare(char *, struct stat *, struct stat *);
 
+typedef struct file_mode_t {
+	char	*str;
+	int	oct;
+} file_mode_t;
+
+file_mode_t	*render_mode(struct stat *);
+
 #define EQ(x,y)	(strcmp(x,y) == 0)
 
 #define ANSI_COLOR_RED     "\x1b[31m"
@@ -197,7 +204,8 @@ walk(char *relative)
 int
 compare(char *work, struct stat *lst, struct stat *rst)
 {
-	int banner	= 0;
+	int		banner = 0;
+	file_mode_t	*lfm, *rfm;
 
 #define PRINT_BANNER_ONCE()					\
 	if (! banner) {						\
@@ -227,5 +235,85 @@ compare(char *work, struct stat *lst, struct stat *rst)
 		);
 	}
 
+	lfm = render_mode(lst);
+	rfm = render_mode(rst);
+
+	if (lfm->oct != rfm->oct) {
+		PRINT_BANNER_ONCE();
+		printf("%s- mode:%d (%s)\n%s+ mode:%d (%s)%s\n",
+			(ctx->do_color) ? ANSI_COLOR_RED : "",
+			rfm->oct,
+			rfm->str,
+			(ctx->do_color) ? ANSI_COLOR_CYAN : "",
+			lfm->oct,
+			lfm->str,
+			(ctx->do_color) ? ANSI_COLOR_RESET : ""
+		);
+	}
+
 	return (EXIT_SUCCESS);
+}
+
+file_mode_t *
+render_mode(struct stat *st)
+{
+	file_mode_t	*fm = calloc(1,sizeof(file_mode_t));
+	fm->str	= calloc(10,sizeof(char));
+
+	if (st->st_mode & S_IRUSR) {
+		strncat(fm->str,"r",sizeof(char));
+		fm->oct += 400;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+	if (st->st_mode & S_IWUSR) {
+		strncat(fm->str,"w",sizeof(char));
+		fm->oct += 200;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+	if (st->st_mode & S_IXUSR) {
+		strncat(fm->str,"x",sizeof(char));
+		fm->oct += 100;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+	if (st->st_mode & S_IRGRP) {
+		strncat(fm->str,"r",sizeof(char));
+		fm->oct += 40;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+	if (st->st_mode & S_IWGRP) {
+		strncat(fm->str,"w",sizeof(char));
+		fm->oct += 20;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+	if (st->st_mode & S_IXGRP) {
+		strncat(fm->str,"x",sizeof(char));
+		fm->oct += 10;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+	if (st->st_mode & S_IROTH) {
+		strncat(fm->str,"r",sizeof(char));
+		fm->oct += 4;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+	if (st->st_mode & S_IWOTH) {
+		strncat(fm->str,"w",sizeof(char));
+		fm->oct += 2;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+	if (st->st_mode & S_IXOTH) {
+		strncat(fm->str,"x",sizeof(char));
+		fm->oct += 1;
+	} else {
+		strncat(fm->str,"-",sizeof(char));
+	}
+
+	return fm;
 }
